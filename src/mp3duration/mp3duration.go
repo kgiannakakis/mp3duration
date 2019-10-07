@@ -3,6 +3,7 @@ package mp3duration
 import (
 	"errors"
 	"io"
+	"math"
 	"os"
 )
 
@@ -51,6 +52,13 @@ var (
 	}
 )
 
+type frame struct {
+	bitRate    int
+	sampleRate int
+	frameSize  int
+	sample     int
+}
+
 func skipID3(buffer []byte) int {
 	var id3v2Flags, z0, z1, z2, z3 byte
 	var tagSize, footerSize int
@@ -80,10 +88,71 @@ func skipID3(buffer []byte) int {
 	return 0
 }
 
+func frameSize(samples int, layer string, bitRate, sampleRate, paddingBit int) int {
+	if sampleRate == 0 {
+		return 0
+	} else if layer == "1" {
+		return ((samples * bitRate * 125 / sampleRate) + paddingBit*4)
+	} else { //layer 2, 3
+		return (((samples * bitRate * 125) / sampleRate) + paddingBit)
+	}
+}
+
+func parseFrameHeader(header []byte) *frame {
+	b1 := header[1]
+	b2 := header[2]
+
+	versionBits := (b1 & 0x18) >> 3
+	version := versions[versionBits]
+
+	var simpleVersion string
+	if version == "2.5" {
+		simpleVersion = "2"
+	} else {
+		simpleVersion = version
+	}
+
+	layerBits := (b1 & 0x06) >> 1
+	layer := layers[layerBits]
+
+	bitRateKey := "V" + simpleVersion + "L" + layer
+	bitRateIndex := (b2 & 0xf0) >> 4
+
+	var bitRate int
+	frameBitRates, exists := bitRates[bitRateKey]
+	if exists && int(bitRateIndex) < len(frameBitRates) {
+		bitRate = frameBitRates[bitRateIndex]
+	} else {
+		bitRate = 0
+	}
+
+	sampleRateIdx := (b2 & 0x0c) >> 2
+	var sampleRate int
+	frameSampleRates, exists := sampleRates[version]
+	if exists && int(sampleRateIdx) < len(frameSampleRates) {
+		sampleRate = frameSampleRates[sampleRateIdx]
+	} else {
+		sampleRate = 0
+	}
+	sample := samples[simpleVersion][layer]
+
+	paddingBit := (b2 & 0x02) >> 1
+	return &frame{
+		bitRate:    bitRate,
+		sampleRate: sampleRate,
+		frameSize:  frameSize(sample, layer, bitRate, sampleRate, int(paddingBit)),
+		sample:     sample,
+	}
+}
+
+func round(duration float64) float64 {
+	return math.Round(duration*1000) / 1000 //round to nearest ms
+}
+
 // Calculate returns the duration of an mp3 file
 func Calculate(filename string) (duration float64, err error) {
 	var f *os.File
-	f, err = os.Open("demo - vbr.mp3")
+	f, err = os.Open(filename)
 	if err != nil {
 		return
 	}
@@ -115,12 +184,25 @@ func Calculate(filename string) (duration float64, err error) {
 			return
 		}
 		if bytesRead < 10 {
+			duration = round(duration)
 			return
 		}
-		offset = offset + int64(bytesRead)
 
-		duration = duration + 1.0
+		if buffer[0] == 0xff && (buffer[1]&0xe0) == 0xe0 {
+			info := parseFrameHeader(buffer)
+			if info.frameSize > 0 && info.sample > 0 {
+				offset += int64(info.frameSize)
+				duration += (float64(info.sample) / float64(info.sampleRate))
+			} else {
+				offset++ //Corrupt file?
+			}
+		} else if buffer[0] == 0x54 && buffer[1] == 0x41 && buffer[2] == 0x47 { //'TAG'
+			offset += 128 //Skip over id3v1 tag size
+		} else {
+			offset++ //Corrupt file?
+		}
 	}
 
+	duration = round(duration)
 	return
 }

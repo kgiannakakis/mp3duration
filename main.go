@@ -13,4 +13,9 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("Duration %v\n", duration)
+	duration, err = mp3duration.Calculate("demo - vbr.mp3")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Duration %v\n", duration)
 }
