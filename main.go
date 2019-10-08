@@ -8,12 +8,12 @@ import (
 )
 
 func main() {
-	duration, err := mp3duration.Calculate("demo - cbr.mp3")
+	duration, err := mp3duration.Calculate("src/mp3duration/testdata/demo - cbr.mp3")
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Duration %v\n", duration)
-	duration, err = mp3duration.Calculate("demo - vbr.mp3")
+	duration, err = mp3duration.Calculate("src/mp3duration/testdata/demo - vbr.mp3")
 	if err != nil {
 		log.Fatal(err)
 	}
